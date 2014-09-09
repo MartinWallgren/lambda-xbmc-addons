@@ -738,6 +738,68 @@ class index:
         xbmcplugin.setContent(int(sys.argv[1]), 'episodes')
         xbmcplugin.endOfDirectory(int(sys.argv[1]), cacheToDisc=False)
 
+    def getMovieItem(self, items, i, autoplay, playbackMenu, action, getmeta, favRead):
+        try:
+            name, title, year, imdb, url, image, genre, plot = i['name'], i['title'], i['year'], i['imdb'], i['url'], i['image'], i['genre'], i['plot']
+            if plot == '0': plot = addonDesc
+
+            sysname, systitle, sysyear, sysimdb, sysurl, sysimage, sysgenre, sysplot = urllib.quote_plus(name), urllib.quote_plus(title), urllib.quote_plus(year), urllib.quote_plus(imdb), urllib.quote_plus(url), urllib.quote_plus(image), urllib.quote_plus(genre), urllib.quote_plus(plot)
+
+            if not autoplay == 'false':
+                u = '%s?action=play&name=%s&title=%s&year=%s&imdb=%s&url=%s&t=%s' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl, datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
+                isFolder = False
+            else:
+                u = '%s?action=get_host&name=%s&title=%s&year=%s&imdb=%s&url=%s&image=%s&genre=%s&plot=%s' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl, sysimage, sysgenre, sysplot)
+                isFolder = True
+
+            if getmeta == 'true':
+                meta = metaget.get_meta('movie', title ,year=year)
+                if imdb == '0': sysimdb = urllib.quote_plus(re.sub('[^0-9]', '', meta['imdb_id']))
+                trailer, poster = urllib.quote_plus(meta['trailer_url']), meta['cover_url']
+                if trailer == '': trailer = sysurl
+                if poster == '': poster = image
+            else:
+                meta = {'label': title, 'title': title, 'year': year, 'imdb_id' : imdb, 'genre' : genre, 'plot': plot}
+                trailer, poster = sysurl, image
+            if getmeta == 'true' and getSetting("fanart") == 'true':
+                fanart = meta['backdrop_url']
+                if fanart == '': fanart = addonFanart
+            else:
+                fanart = addonFanart
+
+            cm = []
+            cm.append((playbackMenu, 'RunPlugin(%s?action=toggle_movie_playback&name=%s&title=%s&year=%s&imdb=%s)' % (sys.argv[0], sysname, systitle, sysyear, sysimdb)))
+            cm.append((language(30406).encode("utf-8"), 'RunPlugin(%s?action=trailer&name=%s&url=%s)' % (sys.argv[0], sysname, trailer)))
+            if not (getSetting("trakt_user") == '' or getSetting("trakt_password") == ''):
+                cm.append((language(30421).encode("utf-8"), 'RunPlugin(%s?action=trakt_manager&name=%s&imdb=%s)' % (sys.argv[0], sysname, sysimdb)))
+            if action == 'movies_favourites':
+                cm.append((language(30408).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_delete&name=%s&url=%s)' % (sys.argv[0], systitle, sysurl)))
+            elif action == 'movies_search':
+                cm.append((language(30407).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_from_search&name=%s&imdb=%s&url=%s&image=%s&year=%s)' % (sys.argv[0], systitle, sysimdb, sysurl, sysimage, sysyear)))
+            else:
+                if not '"%s"' % url in favRead: cm.append((language(30407).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_add&name=%s&imdb=%s&url=%s&image=%s&year=%s)' % (sys.argv[0], systitle, sysimdb, sysurl, sysimage, sysyear)))
+                else: cm.append((language(30408).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_delete&name=%s&url=%s)' % (sys.argv[0], systitle, sysurl)))
+            cm.append((language(30409).encode("utf-8"), 'RunPlugin(%s?action=library_movie_add&name=%s&title=%s&year=%s&imdb=%s&url=%s)' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl)))
+            cm.append((language(30414).encode("utf-8"), 'Action(Info)'))
+            if getmeta == 'true' and not action == 'movies_search':
+                cm.append((language(30405).encode("utf-8"), 'RunPlugin(%s?action=metadata_movies&imdb=%s)' % (sys.argv[0], sysimdb)))
+            if not imdb == '0' and not action == 'movies_search':
+                cm.append((language(30403).encode("utf-8"), 'RunPlugin(%s?action=unwatched_movies&imdb=%s&title=%s&year=%s)' % (sys.argv[0], sysimdb, systitle, sysyear)))
+            if not imdb == '0' and not action == 'movies_search':
+                cm.append((language(30404).encode("utf-8"), 'RunPlugin(%s?action=watched_movies&imdb=%s&title=%s&year=%s)' % (sys.argv[0], sysimdb, systitle, sysyear)))
+            cm.append((language(30417).encode("utf-8"), 'RunPlugin(%s?action=view_movies)' % (sys.argv[0])))
+
+            item = xbmcgui.ListItem(name, iconImage="DefaultVideo.png", thumbnailImage=poster)
+            item.setInfo( type="Video", infoLabels = meta )
+            item.setProperty("IsPlayable", "true")
+            item.setProperty("Video", "true")
+            item.setProperty("art(poster)", poster)
+            item.setProperty("Fanart_Image", fanart)
+            item.addContextMenuItems(cm, replaceItems=True)
+            items.append((item, u, isFolder))
+        except:
+            pass
+
     def movieList(self, movieList):
         if movieList == None or len(movieList) == 0: return
 
@@ -758,68 +820,16 @@ class index:
         file.close()
 
         total = len(movieList)
+        items = []
+        threads = []
         for i in movieList:
-            try:
-                name, title, year, imdb, url, image, genre, plot = i['name'], i['title'], i['year'], i['imdb'], i['url'], i['image'], i['genre'], i['plot']
-                if plot == '0': plot = addonDesc
+            threads.append(Thread(self.getMovieItem, items, i, autoplay, playbackMenu, action, getmeta, favRead))
 
-                sysname, systitle, sysyear, sysimdb, sysurl, sysimage, sysgenre, sysplot = urllib.quote_plus(name), urllib.quote_plus(title), urllib.quote_plus(year), urllib.quote_plus(imdb), urllib.quote_plus(url), urllib.quote_plus(image), urllib.quote_plus(genre), urllib.quote_plus(plot)
+        [i.start() for i in threads]
+        [i.join() for i in threads]
 
-                if not autoplay == 'false':
-                    u = '%s?action=play&name=%s&title=%s&year=%s&imdb=%s&url=%s&t=%s' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl, datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
-                    isFolder = False
-                else:
-                    u = '%s?action=get_host&name=%s&title=%s&year=%s&imdb=%s&url=%s&image=%s&genre=%s&plot=%s' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl, sysimage, sysgenre, sysplot)
-                    isFolder = True
-
-                if getmeta == 'true':
-                    meta = metaget.get_meta('movie', title ,year=year)
-                    if imdb == '0': sysimdb = urllib.quote_plus(re.sub('[^0-9]', '', meta['imdb_id']))
-                    trailer, poster = urllib.quote_plus(meta['trailer_url']), meta['cover_url']
-                    if trailer == '': trailer = sysurl
-                    if poster == '': poster = image
-                else:
-                    meta = {'label': title, 'title': title, 'year': year, 'imdb_id' : imdb, 'genre' : genre, 'plot': plot}
-                    trailer, poster = sysurl, image
-                if getmeta == 'true' and getSetting("fanart") == 'true':
-                    fanart = meta['backdrop_url']
-                    if fanart == '': fanart = addonFanart
-                else:
-                    fanart = addonFanart
-
-                cm = []
-                cm.append((playbackMenu, 'RunPlugin(%s?action=toggle_movie_playback&name=%s&title=%s&year=%s&imdb=%s)' % (sys.argv[0], sysname, systitle, sysyear, sysimdb)))
-                cm.append((language(30406).encode("utf-8"), 'RunPlugin(%s?action=trailer&name=%s&url=%s)' % (sys.argv[0], sysname, trailer)))
-                if not (getSetting("trakt_user") == '' or getSetting("trakt_password") == ''):
-                    cm.append((language(30421).encode("utf-8"), 'RunPlugin(%s?action=trakt_manager&name=%s&imdb=%s)' % (sys.argv[0], sysname, sysimdb)))
-                if action == 'movies_favourites':
-                    cm.append((language(30408).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_delete&name=%s&url=%s)' % (sys.argv[0], systitle, sysurl)))
-                elif action == 'movies_search':
-                    cm.append((language(30407).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_from_search&name=%s&imdb=%s&url=%s&image=%s&year=%s)' % (sys.argv[0], systitle, sysimdb, sysurl, sysimage, sysyear)))
-                else:
-                    if not '"%s"' % url in favRead: cm.append((language(30407).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_add&name=%s&imdb=%s&url=%s&image=%s&year=%s)' % (sys.argv[0], systitle, sysimdb, sysurl, sysimage, sysyear)))
-                    else: cm.append((language(30408).encode("utf-8"), 'RunPlugin(%s?action=favourite_movie_delete&name=%s&url=%s)' % (sys.argv[0], systitle, sysurl)))
-                cm.append((language(30409).encode("utf-8"), 'RunPlugin(%s?action=library_movie_add&name=%s&title=%s&year=%s&imdb=%s&url=%s)' % (sys.argv[0], sysname, systitle, sysyear, sysimdb, sysurl)))
-                cm.append((language(30414).encode("utf-8"), 'Action(Info)'))
-                if getmeta == 'true' and not action == 'movies_search':
-                    cm.append((language(30405).encode("utf-8"), 'RunPlugin(%s?action=metadata_movies&imdb=%s)' % (sys.argv[0], sysimdb)))
-                if not imdb == '0' and not action == 'movies_search':
-                    cm.append((language(30403).encode("utf-8"), 'RunPlugin(%s?action=unwatched_movies&imdb=%s&title=%s&year=%s)' % (sys.argv[0], sysimdb, systitle, sysyear)))
-                if not imdb == '0' and not action == 'movies_search':
-                    cm.append((language(30404).encode("utf-8"), 'RunPlugin(%s?action=watched_movies&imdb=%s&title=%s&year=%s)' % (sys.argv[0], sysimdb, systitle, sysyear)))
-                cm.append((language(30417).encode("utf-8"), 'RunPlugin(%s?action=view_movies)' % (sys.argv[0])))
-
-                item = xbmcgui.ListItem(name, iconImage="DefaultVideo.png", thumbnailImage=poster)
-                item.setInfo( type="Video", infoLabels = meta )
-                item.setProperty("IsPlayable", "true")
-                item.setProperty("Video", "true")
-                item.setProperty("art(poster)", poster)
-                item.setProperty("Fanart_Image", fanart)
-                item.addContextMenuItems(cm, replaceItems=True)
-                xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=u,listitem=item,totalItems=total,isFolder=isFolder)
-            except:
-                pass
-
+        for item, u, isFolder in items:
+            xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=u,listitem=item,totalItems=total,isFolder=isFolder)
         try:
             next = movieList[0]['next']
             if next == '': raise Exception()
